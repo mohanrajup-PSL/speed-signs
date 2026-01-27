@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Speed Limit Signboard Finder</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://unpkg.com" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" />
+  <style>
+    :root { --brand: #155eef; --bg:#0b1324; }
+    html, body { height: 100%; margin: 0; font-family: system-ui, Segoe UI, Roboto, Arial, sans-serif; background:#0b1324; color:#eef3ff;}
+    header { padding: 12px 16px; background: #0d1b34; border-bottom: 1px solid #1f2f56; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    h1 { font-size: 16px; font-weight: 600; margin: 0 8px 0 0; }
+    #searchBar { flex:1; min-width: 280px; display:flex; gap:8px; }
+    #q { flex:1; padding:10px 12px; border-radius:8px; border:1px solid #334a7d; background:#081129; color:#eef3ff; }
+    #go { padding:10px 14px; border-radius:8px; border:0; background:var(--brand); color:white; font-weight:600; cursor:pointer; }
+    #go:hover { filter: brightness(1.05); }
+    #map { height: calc(100% - 62px); }
+    .leaflet-popup-content { font-size: 14px; }
+    .chip { display:inline-block; padding:2px 8px; border-radius:999px; background:#142a58; color:#aecdff; font-size:12px; margin-right:6px;}
+    .src { font-size:12px; margin-top:6px;}
+    .hint { font-size: 12px; opacity: 0.8; margin-left: 8px;}
+    a { color:#aecdff; }
+    .footer { position: fixed; right: 8px; bottom: 6px; font-size: 12px; opacity: .75;}
+  </style>
+</head>
+<body>
+<header>
+  <h1>Speed Limit Signboard Finder</h1>
+  <div id="searchBar">
+    <input id="q" type="text" placeholder="Enter address OR 'lat, lon' (e.g., 39.021, -79.814)" />
+    <button id="go" title="Search">Search</button>
+  </div>
+  <span class="hint">Powered by official DOT open data (MD + UT). WV can be added with its FeatureServer URL.</span>
+</header>
+<div id="map"></div>
+<div class="footer"><span id="status"></span></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+<script>
+/* ===============================
+ *  CONFIG: datasets & query params
+ *  =============================== */
+
+// ArcGIS FeatureServer layer URLs (point layers of speed-limit signs)
+const SOURCES = [
+  {
+    name: "MDOT SHA Posted Speed Limit Signs",
+    // Open data page: https://data-maryland.opendata.arcgis.com/datasets/maryland::mdot-sha-roadway-posted-speed-limit-signs/explore
+    layerUrl: "https://services.arcgis.com/njFNhDsUCentVYJW/arcgis/rest/services/MDOT_SHA_Roadway_Posted_Speed_Limit_Signs/FeatureServer/0",
+    detailsUrl: "https://data-maryland.opendata.arcgis.com/datasets/maryland::mdot-sha-roadway-posted-speed-limit-signs/explore",
+    props: { mutcd: "MUTCD_Code", text: "Legend_Text", dir: "Face_Direction", route: "Route" },
+    radiusM: 1200
+  },
+  {
+    name: "UDOT Speed Limit Signs",
+    // Data hub page: https://hub.arcgis.com/datasets/uplan::speed-limit-signs-2/about
+    // If this layer URL changes, update from the hub page's API link.
+    layerUrl: "https://services.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Speed_Limit_Signs/FeatureServer/0",
+    detailsUrl: "https://hub.arcgis.com/datasets/uplan::speed-limit-signs-2/about",
+    props: { mutcd: "MUTCD", text: "LEGEND", dir: "TRAVEL_DIR", route: "ROUTE" },
+    radiusM: 1200
+  }
+  // To add WV once you have the exact FeatureServer URL from WVDOT Open Data:
+  // ,{
+  //   name: "WVDOT Speed Limit Signs",
+  //   layerUrl: "https://<services.arcgis.com>/<org-id>/arcgis/rest/services/Speed_Limit_Signs/FeatureServer/0",
+  //   detailsUrl: "https://data-wvdot.opendata.arcgis.com/datasets/18c827e7b6a443d29996691c1012589e_0/explore",
+  //   props: { mutcd: "MUTCDCODE", text: "TEXT_", dir: "DIRECTION", route: "ROUTE" },
+  //   radiusM: 1200
+  // }
+];
+
+// Base map
+const map = L.map('map', { zoomControl: true }).setView([39.0, -96.0], 4);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: "&copy; OpenStreetMap contributors"
+}).addTo(map);
+
+const markerLayer = L.layerGroup().addTo(map);
+const statusEl = document.getElementById('status');
+
+// Parse "lat, lon"
+function parseLatLon(input) {
+  const m = input.trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const lat = parseFloat(m[1]), lon = parseFloat(m[2]);
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
+}
+
+// Geocode address with Nominatim (demo)
+async function geocodeAddress(q) {
+  const url = new URL("https://nominatim.openstreetmap.org/search");
+  url.searchParams.set("q", q);
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("limit", "1");
+  const resp = await fetch(url, { headers: { "Accept": "application/json" }});
+  if (!resp.ok) throw new Error(`Geocoding failed: ${resp.status}`);
+  const arr = await resp.json();
+  if (!arr || !arr.length) return null;
+  return { lat: parseFloat(arr[0].lat), lon: parseFloat(arr[0].lon) };
+}
+
+// Haversine (m)
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371008.8; const toRad = d => d * Math.PI/180;
+  const dphi = toRad(lat2 - lat1);
+  const dl = toRad(lon2 - lon1);
+  const a = Math.sin(dphi/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dl/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// Query an ArcGIS FeatureServer layer for nearby points
+async function queryLayerNearest(src, lat, lon, radiusM) {
+  const url = new URL(src.layerUrl.replace(/\/$/, "") + "/query");
+  url.searchParams.set("f", "geojson");
+  url.searchParams.set("where", "1=1");
+  url.searchParams.set("outFields", "*");
+  url.searchParams.set("returnGeometry", "true");
+  url.searchParams.set("geometryType", "esriGeometryPoint");
+  url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
+  url.searchParams.set("geometry", JSON.stringify({ x: lon, y: lat, spatialReference: { wkid: 4326 } }));
+  url.searchParams.set("inSR", "4326");
+  url.searchParams.set("distance", String(Math.max(100, radiusM || 1200)));
+  url.searchParams.set("units", "esriSRUnit_Meter");
+
+  const resp = await fetch(url.toString());
+  if (!resp.ok) throw new Error(`Layer query failed: ${resp.status}`);
+  const gj = await resp.json();
+  const feats = (gj && gj.features) ? gj.features : [];
+  if (!feats.length) return null;
+
+  let best = null;
+  for (const f of feats) {
+    if (!f.geometry || f.geometry.type !== "Point") continue;
+    const [flon, flat] = f.geometry.coordinates;
+    const d = haversine(lat, lon, flat, flon);
+    if (!best || d < best.distance) best = { src, feature: f, distance: d };
+  }
+  return best;
+}
+
+async function findNearestSign(lat, lon) {
+  const tasks = SOURCES.map(s => queryLayerNearest(s, lat, lon, s.radiusM).catch(() => null));
+  const results = (await Promise.all(tasks)).filter(Boolean);
+  if (!results.length) return null;
+  let best = results[0];
+  for (const r of results) if (r.distance < best.distance) best = r;
+  return best;
+}
+
+function showResult(lat, lon, result) {
+  markerLayer.clearLayers();
+  const you = L.circleMarker([lat, lon], { radius: 6, color: "#ffd166", weight: 2, fillColor:"#ffd166", fillOpacity:0.6 })
+    .bindTooltip("Your point").addTo(markerLayer);
+
+  const { feature, src, distance } = result;
+  const [flon, flat] = feature.geometry.coordinates;
+  const p = feature.properties || {};
+  const text = p[src.props.text] || p.text || "Speed Limit";
+  const mutcd = p[src.props.mutcd] || p.mutcd || "";
+  const dir = p[src.props.dir] || p.direction || "";
+  const route = p[src.props.route] || p.route || "";
+
+  const m = L.marker([flat, flon]).addTo(markerLayer);
+  const mi = (distance/1609.344).toFixed(3);
+  const html = `
+    <div>
+      <div class="chip">Nearest sign</div>
+      <div><strong>${text}</strong></div>
+      <div>Distance: ${distance.toFixed(0)} m (${mi} mi)</div>
+      <div>${mutcd ? `MUTCD: <code>${mutcd}</code>` : ""}</div>
+      <div>${route ? `Route: ${route}` : ""} ${dir ? `• Dir: ${dir}` : ""}</div>
+      <div class="src">Source: <a href="${src.detailsUrl}" target="_blank" rel="noopener">${src.name}</a></div>
+    </div>`;
+  m.bindPopup(html).openPopup();
+
+  const bounds = L.latLngBounds([[lat, lon], [flat, flon]]).pad(0.5);
+  map.fitBounds(bounds);
+}
+
+async function runSearch() {
+  const input = document.getElementById("q").value.trim();
+  if (!input) return;
+  statusEl.textContent = "";
+
+  let pt = parseLatLon(input);
+  if (!pt) {
+    try {
+      statusEl.textContent = "Geocoding address…";
+      const g = await geocodeAddress(input);
+      if (!g) { statusEl.textContent = "Address not found."; return; }
+      pt = g;
+    } catch (e) {
+      console.error(e); statusEl.textContent = "Geocoding error."; return;
+    }
+  }
+
+  markerLayer.clearLayers();
+  L.circleMarker([pt.lat, pt.lon], {radius:6, color:"#ffd166", weight:2, fillColor:"#ffd166", fillOpacity:0.6})
+   .bindTooltip("Searching from here…").addTo(markerLayer);
+  map.setView([pt.lat, pt.lon], 13);
+
+  try {
+    statusEl.textContent = "Querying sign layers…";
+    const res = await findNearestSign(pt.lat, pt.lon);
+    if (!res) { statusEl.textContent = "No signboard found within 1.2 km in connected datasets."; return; }
+    statusEl.textContent = "";
+    showResult(pt.lat, pt.lon, res);
+  } catch (e) {
+    console.error(e); statusEl.textContent = "Error querying layers.";
+  }
+}
+
+// UI
+const btn = document.getElementById('go');
+const input = document.getElementById('q');
+btn.addEventListener('click', runSearch);
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
+</script>
+</body>
+</html>
