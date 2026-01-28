@@ -1,0 +1,254 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenStreetBrowser – Speed Limit Finder (Shareable)</title>
+  <style>
+    :root { --bg:#0b1220; --card:#121a2b; --txt:#e8eefc; --muted:#9fb0d0; --brand:#4da3ff; --ok:#2ecc71; --warn:#f1c40f; --err:#ff7675; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:16px/1.45 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif; background:var(--bg); color:var(--txt); }
+    header { padding:18px 20px; border-bottom:1px solid #1f2a44; display:flex; align-items:center; gap:12px; }
+    header h1 { font-size:18px; margin:0; }
+    main { max-width:880px; margin:32px auto; padding:0 16px; }
+    .card { background:var(--card); border:1px solid #1f2a44; border-radius:12px; padding:20px; }
+    label { display:block; margin:10px 0 6px; color:var(--muted); font-size:14px; }
+    input[type="text"], input[type="number"], input[type="url"] { width:100%; padding:12px 14px; border-radius:10px; border:1px solid #243151; background:#0e172a; color:var(--txt); outline:none; }
+    .row { display:grid; grid-template-columns:1fr; gap:12px; }
+    @media (min-width:720px){ .row { grid-template-columns:2fr 1fr 1fr; } }
+    button { cursor:pointer; padding:12px 16px; border-radius:10px; border:0; color:white; background:var(--brand); font-weight:600; }
+    .muted { color:var(--muted); font-size:14px; }
+    .help { margin-top:14px; font-size:14px; color:var(--muted); }
+    .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:20px; background:#0e172a; color:#e8eefc; border:1px solid #243151; padding:10px 14px; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.25); display:none; }
+    .inline { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+    .small { font-size:12px; }
+    .pill { padding:4px 8px; border-radius:999px; border:1px solid #2b3b62; background:#0e172a; }
+    code { background:#0e172a; padding:2px 6px; border-radius:6px; border:1px solid #243151; }
+    .grid-2 { display:grid; gap:14px; grid-template-columns:1fr; }
+    @media (min-width:720px){ .grid-2 { grid-template-columns:1fr 1fr; } }
+    .linkbox { display:flex; gap:8px; }
+    .copy { background:#2b71d6; }
+    .ghost { background:#26334f; }
+    .ok { color:#b9f6ca; }
+    .warn { color:#ffeaa7; }
+    .err { color:#ffb1b1; }
+  </style>
+</head>
+<body>
+  <header>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 2a8 8 0 0 1 6.93 11.57l-4.34-2.5a3 3 0 0 0-3 0l-4.34 2.5A8 8 0 0 1 12 4Zm0 7a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" fill="#4da3ff"/></svg>
+    <h1>OpenStreetBrowser – Speed Limit Finder (Shareable)</h1>
+  </header>
+  <main>
+    <div class="card">
+      <p class="muted">Enter an <strong>address</strong> or a <strong>lat,lon</strong> (e.g., <code>12.9737,77.6092</code>). We’ll center <em>OpenStreetBrowser</em> at <code>zoom=16</code>. Then turn on <em>Transportation → Individual traffic → Maxspeed</em> to see speed‑limit signs. The page will also look for the <strong>nearest mapped speed‑limit sign</strong> and display its coordinates.</p>
+      <div class="row" style="margin-top:12px;">
+        <div>
+          <label for="query">Address or Lat,Long</label>
+          <input id="query" type="text" placeholder="1600 Amphitheatre Pkwy, Mountain View OR 12.9737,77.6092"/>
+        </div>
+        <div>
+          <label for="lat">Lat (optional)</label>
+          <input id="lat" type="number" step="any" placeholder="12.9737"/>
+        </div>
+        <div>
+          <label for="lon">Lon (optional)</label>
+          <input id="lon" type="number" step="any" placeholder="77.6092"/>
+        </div>
+      </div>
+      <div class="inline" style="margin-top:14px;">
+        <button id="openBtn">Open in OpenStreetBrowser</button>
+        <button id="exampleBtn" class="small ghost" title="Fill with a sample for quick testing">Use example</button>
+        <span id="status" class="muted pill">Idle</span>
+      </div>
+      <div class="help">
+        <strong>Priority:</strong> If you fill both address and lat/lon, we’ll use <em>lat/lon</em>. If only address is given, we’ll geocode via OSM Nominatim.
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-top:18px;">
+      <div class="card">
+        <h3 style="margin-top:0;">Nearest speed‑limit sign (if mapped)</h3>
+        <div id="signInfo" class="muted small">Not looked up yet.</div>
+        <div class="inline" style="margin-top:10px;">
+          <button id="openSignBtn" class="ghost" disabled>Open at sign in OpenStreetBrowser</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Shareable public link</h3>
+        <div class="muted small">Give this link to anyone—they’ll land on this page with your location pre‑filled, it will auto‑open OpenStreetBrowser at <code>zoom=16</code>, and attempt to fetch the nearest speed‑limit sign.</div>
+        <div class="linkbox" style="margin-top:10px;">
+          <input id="shareLink" type="url" readonly placeholder="Generate a link by running a search" />
+          <button id="copyBtn" class="copy">Copy</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px;" class="muted small">
+      <p><strong>Notes:</strong> OpenStreetBrowser supports <code>?lat=…&amp;lon=…&amp;zoom=…</code> to set map center/zoom. The Maxspeed category renders <em>maxspeed</em> traffic‑sign icons from zoom level 16. Physical speed‑limit signs are commonly tagged as <code>traffic_sign=maxspeed*</code> and may also include <code>maxspeed=*</code> directly on the sign node. If no sign is mapped nearby, we’ll still open the map centered at your point.</p>
+    </div>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const $ = (id)=>document.getElementById(id);
+
+    function showToast(msg, ms=3000){
+      const t = $('toast');
+      t.textContent = msg; t.style.display='block';
+      setTimeout(()=>{ t.style.display='none'; }, ms);
+    }
+
+    function setStatus(text, cls){
+      const s = $('status');
+      s.textContent = text;
+      s.className = `muted pill ${cls||''}`;
+    }
+
+    function parseLatLon(text){
+      if(!text) return null;
+      const m = text.trim().match(/^\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*$/);
+      if(!m) return null;
+      const lat = parseFloat(m[1]);
+      const lon = parseFloat(m[2]);
+      if (isNaN(lat) || isNaN(lon)) return null;
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+      return {lat, lon};
+    }
+
+    async function geocodeAddress(q){
+      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}`;
+      const resp = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      if(!resp.ok) throw new Error('Geocoding failed');
+      const data = await resp.json();
+      if(!Array.isArray(data) || data.length === 0) throw new Error('No results');
+      const best = data[0];
+      return { lat: parseFloat(best.lat), lon: parseFloat(best.lon), display_name: best.display_name };
+    }
+
+    function openOSB(lat, lon){
+      const url = `https://www.openstreetbrowser.org/?lat=${lat}&lon=${lon}&zoom=16`;
+      window.open(url, '_blank', 'noopener');
+    }
+
+    function buildShareLink(lat, lon, q){
+      const url = new URL(window.location.href);
+      url.searchParams.set('lat', lat.toFixed(6));
+      url.searchParams.set('lon', lon.toFixed(6));
+      if(q) url.searchParams.set('q', q);
+      url.searchParams.set('auto', '1');
+      return url.toString();
+    }
+
+    function haversine(lat1, lon1, lat2, lon2){
+      const toRad = d => d * Math.PI / 180;
+      const R = 6371000; // meters
+      const dLat = toRad(lat2-lat1);
+      const dLon = toRad(lon2-lon1);
+      const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+      return 2*R*Math.asin(Math.sqrt(a));
+    }
+
+    async function findNearestSpeedSign(lat, lon, radius=120){
+      const overpass = `[
+        out:json][timeout:25];(
+          node(around:${radius},${lat},${lon})["traffic_sign"~"maxspeed",i];
+          node(around:${radius},${lat},${lon})["maxspeed"];
+        );out body;`;
+      const resp = await fetch('https://overpass-api.de/api/interpreter', {
+        method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},
+        body:'data='+encodeURIComponent(overpass)
+      });
+      if(!resp.ok) throw new Error('Overpass error');
+      const data = await resp.json();
+      if(!data.elements || data.elements.length===0) return null;
+      let best=null, bestD=Infinity;
+      for(const el of data.elements){
+        if(el.type!== 'node') continue;
+        const d = haversine(lat, lon, el.lat, el.lon);
+        if(d<bestD){ bestD=d; best=el; }
+      }
+      if(!best) return null;
+      return { id: best.id, lat: best.lat, lon: best.lon, distance: bestD, tags: best.tags||{} };
+    }
+
+    function renderSignInfo(sign){
+      const box = $('signInfo');
+      if(!sign){
+        box.innerHTML = '<span class="warn">No mapped speed‑limit sign found near this point (within ~120 m). You can still use the Maxspeed layer to view road limits.</span>';
+        $('openSignBtn').disabled = true;
+        return;
+      }
+      const label = sign.tags && (sign.tags.maxspeed || sign.tags["traffic_sign"]) || 'maxspeed sign';
+      const txt = `Nearest sign: <strong>${label}</strong><br/>Sign coords: <code>${sign.lat.toFixed(6)}, ${sign.lon.toFixed(6)}</code> · ~${Math.round(sign.distance)} m from center.`;
+      box.innerHTML = txt;
+      $('openSignBtn').disabled = false;
+      $('openSignBtn').onclick = ()=> openOSB(sign.lat, sign.lon);
+    }
+
+    async function runWorkflow(){
+      setStatus('Working…','');
+      const q = $('query').value.trim();
+      const latField = $('lat').value.trim();
+      const lonField = $('lon').value.trim();
+
+      let coords = null;
+      if(latField && lonField){
+        const lat = parseFloat(latField), lon = parseFloat(lonField);
+        if(!isNaN(lat)&&!isNaN(lon)&&lat>=-90&&lat<=90&&lon>=-180&&lon<=180){ coords = {lat, lon}; }
+        else { showToast('Invalid lat/lon'); setStatus('Error','err'); return; }
+      }
+      if(!coords && q){
+        const parsed = parseLatLon(q);
+        if(parsed) coords = parsed;
+      }
+      if(!coords && q){
+        try { setStatus('Geocoding…',''); const g = await geocodeAddress(q); coords = {lat:g.lat, lon:g.lon}; }
+        catch(e){ showToast('Could not geocode that address'); setStatus('Error','err'); return; }
+      }
+      if(!coords){ showToast('Enter an address or lat,lon'); setStatus('Idle',''); return; }
+
+      const share = buildShareLink(coords.lat, coords.lon, q);
+      $('shareLink').value = share;
+
+      openOSB(coords.lat, coords.lon);
+
+      setStatus('Looking for nearest speed‑limit sign…','');
+      try {
+        const sign = await findNearestSpeedSign(coords.lat, coords.lon);
+        renderSignInfo(sign);
+        if(sign){ setStatus('Done','ok'); }
+        else { setStatus('No sign found','warn'); }
+      } catch(e){
+        renderSignInfo(null); setStatus('Overpass error','err');
+      }
+    }
+
+    $('openBtn').addEventListener('click', runWorkflow);
+    $('exampleBtn').addEventListener('click', ()=>{
+      $('query').value = '12.9737,77.6092'; $('lat').value=''; $('lon').value='';
+      showToast('Example filled. Click Open.');
+    });
+
+    $('copyBtn')?.addEventListener('click', async ()=>{
+      const link = $('shareLink').value; if(!link){ showToast('No link yet'); return; }
+      try{ await navigator.clipboard.writeText(link); showToast('Public link copied'); }catch{ showToast('Copy failed—select and copy manually'); }
+    });
+
+    (function initFromParams(){
+      const p = new URLSearchParams(window.location.search);
+      const plat = parseFloat(p.get('lat')); const plon = parseFloat(p.get('lon'));
+      const pq = p.get('q')||''; const auto = p.get('auto')==='1';
+      if(pq) $('query').value = pq;
+      if(!isNaN(plat)) $('lat').value = plat;
+      if(!isNaN(plon)) $('lon').value = plon;
+      if((plat && plon) || pq){
+        $('shareLink').value = buildShareLink(plat||0, plon||0, pq);
+        if(auto){ runWorkflow(); }
+      }
+    })();
+  </script>
+</body>
+</html>
